@@ -3,6 +3,7 @@ var Q = require('Q');
 var shortid = require('shortid');
 
 var host="http://forecasts-api-local.intensity.internal";
+
 var token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2ludGVuc2l0eS1sb2NhbC5hdXRoMC5jb20vIiwic3ViIjoiYXV" +
     "0aDB8NTcxNTM3YjE3NGFmMGJmNTJlZWZhMGYzIiwiYXVkIjoiYXpEOTU5YTFhZjF6aVZDbVUyMkNTTXFEUzBOMmtRT0QiLCJleHAiOjE0NjI5Mzc0ND" +
     "csImlhdCI6MTQ2MjkwMTQ0N30.D0XP4XewaPjUHJCL9qvMGzUroah5MIdTS9qFUP4D08Q";
@@ -19,10 +20,6 @@ var groupMemberLengths = [1, 5, 10 , 20, 40, ids.length];
 var randomAmount = getRandomElement(groupMemberLengths);
 createGroupWithMembers(randomAmount);
 
-
-
-
-
 var amount = 10;
 var a = getRandomElements([].concat(ids), amount);
 console.log("a", a.sort());
@@ -30,11 +27,6 @@ var b = getRandomElements(a, amount - 5);
 console.log("b", b.sort());
 var c = subtract(a,b);
 console.log("c", c.sort());
-
-
-
-
-
 
 function subtract(a, b) {
   return a.filter(function(item) {
@@ -108,7 +100,7 @@ function createGroup (groupObj) {
     return deferred.promise;
 }
 
-function curl(host, route, method, json) {
+function curl(host, route, method, json, token) {
     var args = ['curl',
         '-X', method,
         host + route,
@@ -122,9 +114,13 @@ function curl(host, route, method, json) {
     '-H', "'Content-Type: application/json;charset=UTF-8'",
     '-H', "'Accept: application/json, text/plain, */*'",
     '-H', "'Cache-Control: no-cache'",
-    '-H', "'Authorization: Bearer " + token + "'",
     '--compressed'
     ];
+
+    if (token) {
+      args.push('-H');
+      args.push("'Authorization: Bearer " + token + "'");
+    }
 
     if(json && method == "POST") {
         args.push('--data-binary', "'" + JSON.stringify(json) + "'");
