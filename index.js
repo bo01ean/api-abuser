@@ -2,11 +2,9 @@ var exec = require('child-process-promise').exec;
 var Q = require('Q');
 var shortid = require('shortid');
 
-var host="http://forecasts-api-local.intensity.internal";
+var host= process.environment.host;
+var token= process.environment.token;
 
-var token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2ludGVuc2l0eS1sb2NhbC5hdXRoMC5jb20vIiwic3ViIjoiYXV" +
-    "0aDB8NTcxNTM3YjE3NGFmMGJmNTJlZWZhMGYzIiwiYXVkIjoiYXpEOTU5YTFhZjF6aVZDbVUyMkNTTXFEUzBOMmtRT0QiLCJleHAiOjE0NjI5Mzc0ND" +
-    "csImlhdCI6MTQ2MjkwMTQ0N30.D0XP4XewaPjUHJCL9qvMGzUroah5MIdTS9qFUP4D08Q";
 var groupRoute = "/v1/groups";
 
 var groupsToPopulate  = 10;
