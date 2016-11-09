@@ -2,34 +2,30 @@ var exec = require('child-process-promise').exec;
 var Q = require('Q');
 var shortid = require('shortid');
 
-var host= process.environment.host;
-var token= process.environment.token;
+var host = process.env.host;
+var token = process.env.token;
 
-var groupRoute = "/v1/groups";
+console.log(host, token);
 
-var groupsToPopulate  = 10;
+var groupRoute = '/v1/groups/';
+var itemRoute = '/v1/items/';
 
-var ids = [9, 17, 57, 58, 65, 79, 87, 93, 94, 98, 117, 177, 202, 252, 257, 260, 304, 354, 388, 406, 421, 473, 491,
-    515, 535, 538, 545, 550, 553, 578, 638, 642, 646, 656, 660, 707, 742, 762, 790, 847, 850, 851, 858, 926, 950, 991,
-    1124, 1160, 1176, 1184, 1238, 1257, 1288, 1351, 1360, 1368, 1396, 1398, 1568, 1573, 1645, 1654, 1663, 1675, 1705,
-    1742, 1748, 1794, 1832, 1833, 2058, 2481];
+// Known List of Id's to add?
+var ids = [];
 
-var groupMemberLengths = [1, 5, 10 , 20, 40, ids.length];
-var randomAmount = getRandomElement(groupMemberLengths);
-createGroupWithMembers(randomAmount);
+var groupMemberLengths = [1, 5, 10, 20, 40, ids.length]; // lazy log-ish to max
 
-var amount = 10;
-var a = getRandomElements([].concat(ids), amount);
-console.log("a", a.sort());
-var b = getRandomElements(a, amount - 5);
-console.log("b", b.sort());
-var c = subtract(a,b);
-console.log("c", c.sort());
+randomGroupFlow();
 
-function subtract(a, b) {
-  return a.filter(function(item) {
-    return b.indexOf( item ) < 0;
-  });
+
+// Workflow
+function randomGroupFlow() {
+  var funcs = [workflowCreateRandomGroupData, workflowCreateGroup, workflowAddRandomGroupMembers, workflowDeleteGroup];
+  funcs.reduce(Q.when, Q());
+}
+
+function subtract(a, b) { // union / bisect list type stuff
+  return a.filter(item => { return b.indexOf(item) < 0; });
 }
 
 function getRandomElement(arr) {
@@ -38,7 +34,7 @@ function getRandomElement(arr) {
 
 function getRandomElements(arr, amount) {
   amount = Math.min(amount, arr.length);
-  console.log("Getting", amount, "Random elements");
+  console.log('Getting', amount, 'Random elements from', arr);
   var newArr = [];
   var tmp;
   while (newArr.length < amount) {
@@ -52,53 +48,61 @@ function getRandomElements(arr, amount) {
 
 function removeGroupMembers(groupId, items) {
   var promises = [];
-  items.forEach(function (itemId) {
+  items.forEach((itemId) => {
     promises.push(removeGroupMember(groupId, itemId));
   });
   return Q.all(promises);
 }
 
 function removeGroupMember(groupId, itemId) {
-  return curl(host, ["/v1/groups/", groupId, "/members/", itemId], "DELETE");
+  return curl(host, url([groupRoute, groupId, '/members/', itemId]), 'DELETE');
 }
 
-function createGroupWithMembers(amount) {
-    var groupJson = {name: shortid.generate(), composition: "WEIGHTED"};
-    createGroup(groupJson).then(function(newGroupInfo) {
-        var groupMembers = getRandomElements([].concat(ids), amount);
-        addMembers(newGroupInfo.id, groupMembers).then(function(returns) {
-          curl(host, ["/v1/items/", newGroupInfo.id, '/datasets'].join(""), "GET", {}).then(function(result) {
-            console.log(amount, "items");
-            console.timeEnd("group-" + newGroupInfo.id);
-            curl(host, ["/v1/groups/", newGroupInfo.id].join(""), "DELETE").then(function(result){})
-          })
-        });
-    });
+function workflowCreateRandomGroupData() {
+  return { name: shortid.generate(), composition: 'WEIGHTED' };
 }
 
-function addMembers (groupId, groupMembers) {
+function workflowDeleteGroup(results) {
+  var object = extractJsonFromCurlReponse(results);
+  return curl(host, url([groupRoute, object.groupId]), 'DELETE');
+}
+
+function workflowAddRandomGroupMembers(json) {
+  var groupMembers = getRandomElements([].concat(ids), getRandomElement(groupMemberLengths));
+  return addMembers(json, groupMembers);
+}
+
+function addMembers(json, groupMembers) {
     var promises = [];
     var obj = {};
     groupMembers.forEach(function (itemId) {
-        obj = {"groupId": groupId, "itemId":itemId};
-        promises.push(curl(host, ["/v1/groups/", groupId, "/members/", itemId].join(""), "POST",  obj))
+        obj = { groupId: json.id, itemId: itemId };
+        promises.push(curl(host, url([groupRoute, json.id, '/members/', itemId]), 'POST',  obj));
     });
-    console.time("group-" + groupId);
+    console.time('group-' + json.id);
     return Q.all(promises);
 }
 
-function createGroup (groupObj) {
+function workflowCreateGroup(groupObj) {
     var deferred = Q.defer();
-    curl(host, groupRoute, 'POST', groupObj).then(function(result) {
-        var object = JSON.parse(result.stdout);
-        deferred.resolve(object);
+    curl(host, groupRoute, 'POST', groupObj).then(function (result) {
+        if (result.stdout) {
+          try {
+            var object = JSON.parse(result.stdout);
+            deferred.resolve(object);
+          } catch (e) {
+            deferred.reject(e);
+          }
+        } else {
+          deferred.reject({ err: 'JSON not returned from api call.' });
+        }
     }).catch(function (err) {
         deferred.reject(err);
     });
     return deferred.promise;
 }
 
-function curl(host, route, method, json, token) {
+function curl(host, route, method, json) {
     var args = ['curl',
         '-X', method,
         host + route,
@@ -120,10 +124,39 @@ function curl(host, route, method, json, token) {
       args.push("'Authorization: Bearer " + token + "'");
     }
 
-    if(json && method == "POST") {
+    if (json && method == 'POST') {
         args.push('--data-binary', "'" + JSON.stringify(json) + "'");
     }
 
-    var command = args.join(" ");
-    return exec(command)
+//    console.log(route, method, json);
+
+    var command = args.join(' ');
+    return exec(command);
+}
+
+function extractJsonFromCurlReponse(responses) {
+  var object;
+  var response;
+  if (typeof responses === typeof []) {
+    result = responses[0];
+  } else {
+    result = responses;
+  }
+  return JSON.parse(result.stdout);
+}
+
+function url(list) {
+  return list.join('');
+};
+
+function logspace(start, to, len) {
+  var err = 'from must be greater than zero';
+  var base = Math.pow(to / start, 1 / len);
+  var arr = new Array(len);
+  var i = 1;
+  if (isNaN(base)) throw new TypeError(err);
+  for (; i <= len; ++i) {
+    arr[i - 1] = start * Math.pow(base, i);
+  }
+  return arr;
 }
