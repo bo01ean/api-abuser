@@ -1,18 +1,22 @@
 const exec = require('child-process-promise').exec;
 const Q = require('Q');
 const shortid = require('shortid');
+const debug = require('debug')('curl');
 
 const host = process.env.host;
 const token = process.env.token;
 
-console.log(host, token);
-
-const groupRoute = '/v1/groups/';
-const itemRoute = '/v1/items/';
-
 var path = 'v1';
-path = 'earnings';
-const maxRunners = 100;
+path = 'revenue';
+
+console.log(host, token, path);
+
+const groupRoute = '/' + path + '/groups/';
+const itemRoute = '/' + path + '/items/';
+
+const maxRunners = 1;
+var ids = [];
+var groupMemberLengths = [];
 
 var Worker = function (path) {
 
@@ -23,6 +27,16 @@ var Worker = function (path) {
   var ids = [];
   var dashboardId;
   var id = shortid.generate();
+  var groupId;
+  var members = 0;
+
+  this.start = function () {
+    console.time('run-' + id);
+  };
+  this.end = function () {
+    console.timeEnd('run-' + id);
+    console.log('...with ' +  members + ' members.');
+  };
 
   this.workflowMakeList = function (response) {
     var objects = JSON.parse(response.stdout);
@@ -35,11 +49,10 @@ var Worker = function (path) {
   this.workflowAddItemsToChart = function (response) {
     var data = JSON.parse(response.stdout);
     var randomList = getRandomElements([].concat(ids), getRandomInt(1, 10));
-
-    //console.log('Adding: ', randomList, 'to:', data.id);
+    members = randomList.length;
     var promises = [];
     randomList.forEach((item) => {
-       promises.push(curl(url([chartsRoute, '/', data.id.toString(), '/items']),
+       promises.push(curl(url([chartsRoute, '/', data.id, '/items']),
        'POST',
        { itemId: item, chartId: data.id, color: '#29ABDE', style: 'Item->dash' }));
     });
@@ -54,22 +67,26 @@ var Worker = function (path) {
   };
 
   this.workflowDeleteDashboard = function (response) {
-    return curl(url([dashboardsRoute, '/', dashboardId.toString()]), 'DELETE');
+    return curl(url([dashboardsRoute, '/', dashboardId]), 'DELETE');
   };
 
   this.funcs = [
-    function () {
-      console.time('run-' + id);
-    },
+    this.start,
     workFlowSearch, this.workflowMakeList, workflowAddDashboard,
     this.workflowAddChartToDashboard, this.workflowAddItemsToChart,
     workflowDeleteChart, this.workflowDeleteDashboard,
-    function (r) {
-      console.timeEnd('run-' + id);
-    }];//workflowCreateChart];//, workflowAddRandomItems, workflowDeleteChart];
+    this.end];
+
   this.run = function () {
     this.funcs.reduce(Q.when, Q());
   };
+
+  this.randomGroupFlow = function () {
+    this.funcs = [this.start, workFlowSearch, workflowMakeList, workflowCreateRandomGroupData,
+      workflowCreateGroup, workflowAddRandomGroupMembers, workFlowGetGroupData,
+      workflowDeleteGroup, this.end];
+  };
+
   function workFlowSearch() {
     return curl(url([searchRoute, '?limit=10000&q=%25']), 'GET');
   }
@@ -82,14 +99,19 @@ var Worker = function (path) {
 
   function workflowDeleteChart(response) {
       var data = extractJsonFromCurlReponse(response);
-      //console.log(data);
-      return curl(url([chartsRoute, '/', data.chartId.toString()]), 'DELETE');
+      return curl(url([chartsRoute, '/', data.chartId]), 'DELETE');
   }
 
-  // Workflow
-  function randomGroupFlow() {
-    var funcs = [workflowCreateRandomGroupData, workflowCreateGroup, workflowAddRandomGroupMembers, workflowDeleteGroup];
-    funcs.reduce(Q.when, Q());
+  function workflowMakeList(response) {
+    console.log(response);
+    var objects = JSON.parse(response.stdout);
+    console.log(response);
+    objects.forEach((obj) => {
+      console.log(obj);
+      ids.push(obj.id);
+    });
+    groupMemberLengths = [1, 5, 10, 20]; // lazy log-ish to max
+    return ids;
   }
 
   function subtract(a, b) { // union / bisect list type stuff
@@ -132,24 +154,34 @@ var Worker = function (path) {
   }
 
   function workflowDeleteGroup(results) {
-    var object = extractJsonFromCurlReponse(results);
-    return curl(url([groupRoute, object.groupId]), 'DELETE');
+    return curl(url([groupRoute, groupId]), 'DELETE');
   }
 
   function workflowAddRandomGroupMembers(json) {
     var groupMembers = getRandomElements([].concat(ids), getRandomElement(groupMemberLengths));
+    members = groupMembers.length;
     return addMembers(json, groupMembers);
   }
 
   function addMembers(json, groupMembers) {
       var promises = [];
       var obj = {};
+      groupId = json.id;
       groupMembers.forEach(function (itemId) {
           obj = { groupId: json.id, itemId: itemId };
           promises.push(curl(url([groupRoute, json.id, '/members/', itemId]), 'POST',  obj));
       });
       console.time('group-' + json.id);
       return Q.all(promises);
+  }
+
+  function datasetRoute(id) {
+    return url(['/' + path, '/items/', id, '/datasets']);
+  }
+
+  function workFlowGetGroupData(results) {
+    var data = extractJsonFromCurlReponse(results);
+    return curl(url([datasetRoute(groupId)]));
   }
 
   function workflowCreateGroup(groupObj) {
@@ -172,43 +204,40 @@ var Worker = function (path) {
   }
 
   function curl(route, method, json) {
-      var args = ['curl',
-          '-X', method,
-          "'" + host + route + "'",
-      '-H', "'Pragma: no-cache'",
-      '-H', "'Origin: http://localhost:3000'",
-      '-H', "'Referer: http://localhost:3000/'",
-      '-H', "'Connection: keep-alive'",
-      '-H', "'Accept-Encoding: gzip, deflate'",
-      '-H', "'Accept-Language: en-US,en;q=0.8'",
-      '-H', "'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.94 Safari/537.36'",
-      '-H', "'Content-Type: application/json;charset=UTF-8'",
-      '-H', "'Accept: application/json, text/plain, */*'",
-      '-H', "'Cache-Control: no-cache'",
-      '--compressed'
-      ];
+    method = (method == undefined) ? 'GET' : method;
+    var args = [
+    'curl',
+    '-X', method,
+    "'" + host + route + "'",
+    '-H', "'Pragma: no-cache'",
+    '-H', "'Origin: http://localhost:3000'",
+    '-H', "'Referer: http://localhost:3000/'",
+    '-H', "'Connection: keep-alive'",
+    '-H', "'Accept-Encoding: gzip, deflate'",
+    '-H', "'Accept-Language: en-US,en;q=0.8'",
+    '-H', "'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.94 Safari/537.36'",
+    '-H', "'Content-Type: application/json;charset=UTF-8'",
+    '-H', "'Accept: application/json, text/plain, */*'",
+    '-H', "'Cache-Control: no-cache'",
+    '--compressed'
+    ];
 
-      if (token) {
-        args.push('-H');
-        args.push("'Authorization: Bearer " + token + "'");
-      }
+    if (token) {
+      args.push('-H');
+      args.push("'Authorization: Bearer " + token + "'");
+    }
 
-      if (json && method == 'POST') {
-          args.push('--data-binary', "'" + JSON.stringify(json) + "'");
-      }
+    if (json && method == 'POST') {
+        args.push('--data-binary', "'" + JSON.stringify(json) + "'");
+    }
 
-      //console.log(route, method, json);
-      var command = args.join(' ');
+    var command = args.join(' ');
+    debug(method, route, json, command);
 
-      // console.log(command);
-
-      //console.log(command);
-      return exec(command);
+    return exec(command);
   }
 
   function extractJsonFromCurlReponse(responses) {
-    var object;
-    var response;
     if (typeof responses === typeof []) {
       result = responses[0];
     } else {
@@ -219,6 +248,11 @@ var Worker = function (path) {
 
   function url(list) {
     var indexToPop;
+
+    list.map((item, i) => {
+      list[i] = item.toString();
+    });
+
     var params = list.filter((partial, index) => {
       if (partial.match(/^\?/)) {
         indexToPop = index;
@@ -229,9 +263,8 @@ var Worker = function (path) {
     if (indexToPop) {
       list.splice(indexToPop, 1);
     }
-    var url = list.join('') + params.join('');
 
-    //console.log(url);
+    var url = list.join('') + params.join('');
     return url;
   };
 
@@ -256,8 +289,10 @@ var runners = [];
 
 while (runners.length < maxRunners) {
   runners.push(new Worker(path));
+  runners[runners.length - 1].randomGroupFlow();
   runners[runners.length - 1].run();
 }
 
-//var groupMemberLengths = [1, 5, 10, 20, 40, ids.length]; // lazy log-ish to max
-//randomGroupFlow();
+process.on('uncaughtException', function (err) {
+  console.log('Caught exception: ' + err);
+});

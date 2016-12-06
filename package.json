@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "child-process-promise": "^2.0.2",
+    "debug": "^2.3.3",
     "shortid": "^2.2.6"
   }
 }
